@@ -28,6 +28,9 @@ class Map:
     def getbuffer(self):
         return self.buffer
 
+    def getchar(self, x, y):
+        return self.buffer["ch"][y,x]
+
     def fillchar(self, char):
         self.buffer["ch"][:,:] = char
 
@@ -123,6 +126,7 @@ class Scene():
     def __init__(self):
         self.map = Map(WIDTH, HEIGHT)
         self.ui = UI()
+        self.entities = []
 
     def process_input(self, event):
         return ""
@@ -132,6 +136,8 @@ class Scene():
             for j in range(HEIGHT):
                 cnsl.tiles[i, j] = self.map.buffer[i, j]
                 self.ui.draw_ui(cnsl)
+                for k in range(len(self.entities)):
+                    self.entities[k].draw(cnsl)
 
 class GameState():
     def __init__(self, initialscene):
@@ -139,6 +145,28 @@ class GameState():
 
     def set_scene(self, newscene):
         self.currentscene = newscene
+
+class Sprite():
+    def __init__(self, x, y, char, color: tuple=(255,255,255,255)):
+        self.x = x
+        self.y = y
+        self.map = Map(1,1, fg=(color))
+        self.map.setchar(ord(char),0,0)
+        self.health = 4
+
+    def setpos(self, x, y):
+        self.x = x
+        self.y = y
+
+    def move(self, vel_x, vel_y):
+        self.x += vel_x
+        self.y += vel_y
+
+    def takedamage(self):
+        self.health -= 1
+
+    def draw(self, cnsl):
+        cnsl.tiles[self.y, self.x] = self.map.buffer[0,0]
 
 # Main Menu State
 # Make the map
@@ -148,6 +176,7 @@ menu.draw_wall(True,0,0,4,4)
 menu.draw_wall(True,12,0,4,4)
 menu.draw_wall(True,0,12,4,4)
 menu.draw_wall(True,12,12,4,4)
+menu.draw_wall(False,4,4,8,8)
 menu.print_str(4,2,"FORTRESS")
 
 # Make the ui
@@ -164,6 +193,7 @@ class MainMenu(Scene):
     def __init__(self):
         self.map = menu
         self.ui = menu_ui
+        self.entities = []
 
     def process_input(self, event):
         if event.type == "KEYDOWN":
@@ -199,6 +229,90 @@ class Credits(Scene):
     def __init__(self):
         self.map = credits
         self.ui = empty_ui
+        self.entities = []
+    
+    def process_input(self, event):
+        if event.type == "KEYDOWN":
+            if event.scancode == tcod.event.SCANCODE_ESCAPE:
+                return "main"
+        return ""
+
+# Setting up the arena
+arena = Map(16,16)
+arena.draw_wall(True,0,0,16,16)
+arena.draw_wall(True,0,0,4,4)
+arena.draw_wall(True,12,0,4,4)
+arena.draw_wall(True,0,12,4,4)
+arena.draw_wall(True,12,12,4,4)
+
+player = Sprite(8,14,"Ç",(0,255,0,255))
+skeleton = Sprite(7,1,"é")
+
+class Arena(Scene):
+    def __init__(self):
+        self.map = arena
+        self.ui = empty_ui
+        self.entities = [skeleton, player]
+
+    def reset(self):
+        self.entities[0] = Sprite(7,1,"é")
+        self.entities.append(Sprite(8,14,"Ç",(0,255,0,255)))
+    
+    def process_input(self, event):
+        vel_x = 0
+        vel_y = 0
+        win = ""
+        if event.type == "KEYDOWN":
+            if event.scancode == tcod.event.SCANCODE_ESCAPE:
+                return "main"
+            elif event.scancode == tcod.event.SCANCODE_UP:
+                vel_y = -1
+            elif event.scancode == tcod.event.SCANCODE_DOWN:
+                vel_y = 1
+            elif event.scancode == tcod.event.SCANCODE_LEFT:
+                vel_x = -1
+            elif event.scancode == tcod.event.SCANCODE_RIGHT:
+                vel_x = 1
+            win = self.process_movement(vel_x, vel_y)
+        return win
+
+    def process_movement(self, vel_x, vel_y):
+        for i in range(len(self.entities)):
+            wall = False
+            while not wall:
+                if self.map.getchar(self.entities[i].x+vel_x,self.entities[i].y+vel_y) == ord(" "):
+                    self.entities[i].move(vel_x, vel_y)
+                else:
+                    wall = True
+            for j in range(len(self.entities)-1):
+                if self.entities[i].x == self.entities[j].x and self.entities[i].y == self.entities[j].y and i != j:
+                    self.entities.remove(self.entities[j])
+        if len(self.entities) == 1:
+            self.reset()
+            return "win"
+        return ""
+
+# Make the win state
+# Make the map
+win = Map(16, 16)
+win.draw_wall(True,0,0,16,16)
+win.draw_wall(True,0,0,4,4)
+win.draw_wall(True,12,0,4,4)
+win.draw_wall(True,0,12,4,4)
+win.draw_wall(True,12,12,4,4)
+win.print_str(4,2,"FORTRESS")
+win.print_str(5,5,"WINNER")
+win.print_str(2,7,"ASSETS:KENNY")
+win.print_str(3,9,"MADE USING")
+win.print_str(4,10,"LIBTCOD")
+win.print_str(5,11,"NUMPY")
+# No ui
+
+class Win(Scene):
+    def __init__(self):
+        self.map = win
+        self.ui = empty_ui
+        self.entities = []
     
     def process_input(self, event):
         if event.type == "KEYDOWN":
@@ -216,7 +330,9 @@ def main() -> None:
     console = tcod.Console(WIDTH, HEIGHT)
     mainmenu_s = MainMenu()
     credits_s = Credits()
-    statemachine = GameState(credits_s)
+    arena_s = Arena()
+    win_s = Win()
+    statemachine = GameState(mainmenu_s)
     # Create a window based on this console and tileset.
     with tcod.context.new_terminal(
         console.width, console.height, tileset=tileset,
@@ -233,6 +349,10 @@ def main() -> None:
                     statemachine.set_scene(mainmenu_s)
                 elif newstate == "credits":
                     statemachine.set_scene(credits_s)
+                elif newstate == "play":
+                    statemachine.set_scene(arena_s)
+                elif newstate == "win":
+                    statemachine.set_scene(win_s)
                 if event.type == "QUIT":
                     raise SystemExit()
         # The window will be closed after the above with-block exits.
